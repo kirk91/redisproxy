@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -71,7 +72,7 @@ func (p *proxy) addCmdHandler(scope *stats.Scope, cmd string, fn commandHandleFu
 }
 
 func (p *proxy) findCmdHandler(cmd string) (*commandHandler, bool) {
-	hdlr, ok := p.cmdHdlrs[cmd]
+	hdlr, ok := p.cmdHdlrs[strings.ToLower(cmd)]
 	return hdlr, ok
 }
 
