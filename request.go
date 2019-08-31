@@ -21,6 +21,7 @@ func newRawRequest(v *RespValue) *rawRequest {
 	return &rawRequest{
 		createdAt: time.Now(),
 		body:      v,
+		hooks:     make([]func(*rawRequest), 0, 8),
 		done:      make(chan struct{}),
 	}
 }
@@ -84,6 +85,7 @@ func newSimpleRequest(v *RespValue) *simpleRequest {
 	return &simpleRequest{
 		createdAt: time.Now(),
 		body:      v,
+		hooks:     make([]func(*simpleRequest), 0, 8),
 		done:      make(chan struct{}),
 	}
 }
