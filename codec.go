@@ -104,6 +104,7 @@ func (d *decoder) decodeInt() (int64, error) {
 // btoi64 parse bytes to int64
 func btoi64(b []byte) (int64, error) {
 	if len(b) != 0 && len(b) < 10 {
+		// better performace and zero alloc.
 		var neg, i = false, 0
 		switch b[0] {
 		case '-':
