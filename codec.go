@@ -90,12 +90,12 @@ func (d *decoder) decode() (*RespValue, error) {
 func (d *decoder) decodeInt() (int64, error) {
 	// TODO(kirk91): Maybe there are some illegal characters before CR, we
 	// should find them as soon as possible.
-	b, err := d.br.ReadSlice('\n')
+	b, err := d.br.ReadSlice(LF)
 	if err != nil {
 		return 0, err
 	}
 	n := len(b) - 2
-	if n < 0 || b[n] != '\r' {
+	if n < 0 || b[n] != CR {
 		return 0, ErrBadCRLFEnd
 	}
 	return btoi64(b[:n])
@@ -152,12 +152,12 @@ func (d *decoder) decodeBulkString() ([]byte, error) {
 }
 
 func (d *decoder) decodeTextBytes() ([]byte, error) {
-	b, err := d.br.ReadBytes('\n')
+	b, err := d.br.ReadBytes(LF)
 	if err != nil {
 		return nil, err
 	}
 	n := len(b) - 2
-	if n < 0 || b[n] != '\r' {
+	if n < 0 || b[n] != CR {
 		return nil, ErrBadCRLFEnd
 	}
 	return b[:n], nil
