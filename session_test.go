@@ -36,7 +36,9 @@ func TestSessionReadError(t *testing.T) {
 }
 
 func TestSessionWriteError(t *testing.T) {
-	l, err := net.Listen("tcp", ":0")
+	// NOTE: If the address of listen is :0, test will fail immediately.
+	// We should find the root cause as soon as possible.
+	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Error(err)
 		return

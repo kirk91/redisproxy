@@ -1,0 +1,14 @@
+# github.com/davecgh/go-spew v1.1.0
+github.com/davecgh/go-spew/spew
+# github.com/kirk91/stats v0.0.1
+github.com/kirk91/stats
+# github.com/pmezard/go-difflib v1.0.0
+github.com/pmezard/go-difflib/difflib
+# github.com/samaritan-proxy/circonusllhist v0.1.4-0.20190806093241-84ee61d2707c
+github.com/samaritan-proxy/circonusllhist
+# github.com/stretchr/testify v1.4.0
+github.com/stretchr/testify/assert
+# gopkg.in/yaml.v2 v2.2.2
+gopkg.in/yaml.v2
+# k8s.io/klog v0.4.0
+k8s.io/klog
