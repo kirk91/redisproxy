@@ -1,4 +1,4 @@
-package main
+package proxy
 
 import (
 	"fmt"
@@ -11,14 +11,14 @@ import (
 	"k8s.io/klog"
 )
 
-type proxyConfig struct {
+type Config struct {
 	Bind  int
 	Hosts []string
 }
 
 type proxy struct {
 	mu       sync.Mutex
-	cfg      *proxyConfig
+	cfg      *Config
 	stats    *stats.Scope
 	u        *upstream
 	cmdHdlrs map[string]*commandHandler
@@ -30,7 +30,7 @@ type proxy struct {
 	quit chan struct{}
 }
 
-func newProxy(cfg *proxyConfig, scope *stats.Scope) (*proxy, error) {
+func New(cfg *Config, scope *stats.Scope) (*proxy, error) {
 	p := &proxy{
 		cfg:      cfg,
 		stats:    scope,

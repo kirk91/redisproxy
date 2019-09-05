@@ -10,6 +10,8 @@ import (
 
 	"github.com/kirk91/stats"
 	"k8s.io/klog"
+
+	"github.com/kirk91/redisproxy/proxy"
 )
 
 var (
@@ -31,8 +33,8 @@ func main() {
 
 	store := stats.NewStore(stats.NewStoreOption())
 	go store.FlushingLoop(context.Background())
-	cfg := &proxyConfig{Bind: bind, Hosts: hosts}
-	p, err := newProxy(cfg, store.CreateScope(""))
+	cfg := &proxy.Config{Bind: bind, Hosts: hosts}
+	p, err := proxy.New(cfg, store.CreateScope(""))
 	if err != nil {
 		klog.Fatal(err)
 	}

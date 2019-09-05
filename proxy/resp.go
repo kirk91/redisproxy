@@ -1,4 +1,4 @@
-package main
+package proxy
 
 type RespType byte
 
