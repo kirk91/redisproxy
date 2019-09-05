@@ -27,7 +27,7 @@ func init() {
 
 func main() {
 	hosts := strings.Split(hostsStr, ",")
-	if len(hosts) == 0 {
+	if hostsStr == "" || len(hosts) == 0 {
 		klog.Fatal("empty hosts")
 	}
 
