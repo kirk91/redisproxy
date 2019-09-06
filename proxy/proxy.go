@@ -193,8 +193,6 @@ func (p *proxy) handleRequest(req *rawRequest) {
 		return
 	}
 
-	// pre process with filters
-
 	// find corresponding _handler
 	cmd := string(req.Body().Array[0].Text)
 	hdlr, ok := p.findCmdHandler(cmd)

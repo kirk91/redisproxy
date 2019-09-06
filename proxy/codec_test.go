@@ -104,15 +104,27 @@ func benchmarkEncode(b *testing.B, n int) {
 	assert.Nil(b, e.Flush())
 }
 
-func BenchmarkEncode16B(b *testing.B)  { benchmarkEncode(b, 16) }
-func BenchmarkEncode64B(b *testing.B)  { benchmarkEncode(b, 64) }
-func BenchmarkEncode512B(b *testing.B) { benchmarkEncode(b, 512) }
-func BenchmarkEncode1K(b *testing.B)   { benchmarkEncode(b, 1024) }
-func BenchmarkEncode2K(b *testing.B)   { benchmarkEncode(b, 1024*2) }
-func BenchmarkEncode4K(b *testing.B)   { benchmarkEncode(b, 1024*4) }
-func BenchmarkEncode16K(b *testing.B)  { benchmarkEncode(b, 1024*16) }
-func BenchmarkEncode32K(b *testing.B)  { benchmarkEncode(b, 1024*32) }
-func BenchmarkEncode128K(b *testing.B) { benchmarkEncode(b, 1024*128) }
+func BenchmarkEncode(b *testing.B) {
+	tests := []struct {
+		name     string
+		dataSize int
+	}{
+		{"16B", 16},
+		{"64B", 64},
+		{"512B", 512},
+		{"1KB", 1024},
+		{"2KB", 1024 * 2},
+		{"4KB", 1024 * 4},
+		{"16KB", 1024 * 16},
+		{"32KB", 1024 * 32},
+		{"128KB", 1024 * 128},
+	}
+	for _, test := range tests {
+		b.Run(test.name, func(b *testing.B) {
+			benchmarkEncode(b, test.dataSize)
+		})
+	}
+}
 
 func TestBtoi64(t *testing.T) {
 	assert := assert.New(t)
@@ -206,26 +218,32 @@ func (b *loopReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-func newBenchmarkDecoder(t *testing.B, n int) *decoder {
+func newBenchmarkDecoder(n int) (*decoder, error) {
 	v := newArray([]RespValue{
 		*newBulkString(string(make([]byte, n))),
 	})
 	var buf bytes.Buffer
 	enc := newEncoder(&buf, 8192)
-	err := enc.Encode(v)
-	assert.Nil(t, err)
+	enc.Encode(v)
 	enc.Flush()
 	p := buf.Bytes()
+
 	var b bytes.Buffer
 	for i := 0; i < 128 && b.Len() < 1024*1024; i++ {
 		_, err := b.Write(p)
-		assert.Nil(t, err)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return newDecoder(bytes.NewReader(b.Bytes()), 1024*128)
+	return newDecoder(&loopReader{buf: b.Bytes()}, 1024*128), nil
 }
 
 func benchmarkDecode(b *testing.B, n int) {
-	d := newBenchmarkDecoder(b, n)
+	d, err := newBenchmarkDecoder(n)
+	if err != nil {
+		b.Error(err)
+		return
+	}
 	for i := 0; i < b.N; i++ {
 		v, err := d.Decode()
 		assert.Nil(b, err)
@@ -233,12 +251,24 @@ func benchmarkDecode(b *testing.B, n int) {
 	}
 }
 
-func BenchmarkDecode16B(b *testing.B)  { benchmarkDecode(b, 16) }
-func BenchmarkDecode64B(b *testing.B)  { benchmarkDecode(b, 64) }
-func BenchmarkDecode512B(b *testing.B) { benchmarkDecode(b, 512) }
-func BenchmarkDecode1K(b *testing.B)   { benchmarkDecode(b, 1024) }
-func BenchmarkDecode2K(b *testing.B)   { benchmarkDecode(b, 1024*2) }
-func BenchmarkDecode4K(b *testing.B)   { benchmarkDecode(b, 1024*4) }
-func BenchmarkDecode16K(b *testing.B)  { benchmarkDecode(b, 1024*16) }
-func BenchmarkDecode32K(b *testing.B)  { benchmarkDecode(b, 1024*32) }
-func BenchmarkDecode128K(b *testing.B) { benchmarkDecode(b, 1024*128) }
+func BenchmarkDecode(b *testing.B) {
+	tests := []struct {
+		name     string
+		dataSize int
+	}{
+		{"16B", 16},
+		{"64B", 64},
+		{"512B", 512},
+		{"1KB", 1024},
+		{"2KB", 1024 * 2},
+		{"4KB", 1024 * 4},
+		{"16KB", 1024 * 16},
+		{"32KB", 1024 * 32},
+		{"128KB", 1024 * 128},
+	}
+	for _, test := range tests {
+		b.Run(test.name, func(b *testing.B) {
+			benchmarkDecode(b, test.dataSize)
+		})
+	}
+}
