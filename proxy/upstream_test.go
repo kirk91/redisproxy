@@ -116,9 +116,54 @@ func TestUpstreamClientHandleRedirection(t *testing.T) {
 	c.SetRedirectionCallback(func(req *simpleRequest, v *RespValue) {
 		req.SetResponse(newBulkString("1"))
 	})
+	t.Run("moved", func(t *testing.T) {
+		go func() {
+			sconn.Read(make([]byte, 8192))
+			sconn.Write([]byte("-moved 3999 127.0.0.1:6380\r\n"))
+		}()
+		req := newSimpleRequest(newArray([]RespValue{
+			*newBulkString("get"),
+			*newBulkString("a"),
+		}))
+		c.Send(req)
+		req.Wait()
+		assert.Equal(t, BulkString, req.Response().Type)
+	})
+
+	t.Run("ask", func(t *testing.T) {
+		go func() {
+			sconn.Read(make([]byte, 8192))
+			sconn.Write([]byte("-ask 3999 127.0.0.1:6380\r\n"))
+		}()
+		req := newSimpleRequest(newArray([]RespValue{
+			*newBulkString("get"),
+			*newBulkString("a"),
+		}))
+		c.Send(req)
+		req.Wait()
+		assert.Equal(t, BulkString, req.Response().Type)
+	})
+}
+
+func TestUpstreamClientHandleClusterDown(t *testing.T) {
+	cconn, sconn := net.Pipe()
+	c := newClient(cconn)
+	done := make(chan struct{})
+	go func() {
+		c.Start()
+		close(done)
+	}()
+	defer func() {
+		c.Stop()
+		<-done
+	}()
+
+	c.SetClusterDownCallabck(func(req *simpleRequest, v *RespValue) {
+		req.SetResponse(newBulkString("1"))
+	})
 	go func() {
 		sconn.Read(make([]byte, 8192))
-		sconn.Write([]byte("-moved 3999 127.0.0.1:6380\r\n"))
+		sconn.Write([]byte("-CLUSTERDOWN the cluster is down\r\n"))
 	}()
 	req := newSimpleRequest(newArray([]RespValue{
 		*newBulkString("get"),
@@ -454,6 +499,15 @@ func TestUpstreamHandleRedirection(t *testing.T) {
 	}()
 
 	t.Run("moved", func(t *testing.T) {
+		triggerSlotsRefCalled := false
+		u.slotsRefTriggerHook = func() {
+			triggerSlotsRefCalled = true
+		}
+		defer func() {
+			assert.True(t, triggerSlotsRefCalled)
+			u.slotsRefTriggerHook = nil
+		}()
+
 		l, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
 			t.Error(err)
@@ -470,7 +524,7 @@ func TestUpstreamHandleRedirection(t *testing.T) {
 		resp := newError("moved 123 " + addr)
 		u.handleRedirection(req, resp)
 
-		// assert rawRequest
+		// assert request
 		conn, _ := l.Accept()
 		b := make([]byte, 1024)
 		n, _ := conn.Read(b)
@@ -479,6 +533,15 @@ func TestUpstreamHandleRedirection(t *testing.T) {
 	})
 
 	t.Run("ask", func(t *testing.T) {
+		triggerSlotsRefCalled := false
+		u.slotsRefTriggerHook = func() {
+			triggerSlotsRefCalled = true
+		}
+		defer func() {
+			assert.True(t, triggerSlotsRefCalled)
+			u.slotsRefTriggerHook = nil
+		}()
+
 		l, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
 			t.Error(err)
@@ -504,4 +567,34 @@ func TestUpstreamHandleRedirection(t *testing.T) {
 		assert.Equal(t, req.Body(), v)
 		conn.Close()
 	})
+}
+
+func TestUpstreamHandleClusterDown(t *testing.T) {
+	u := newUpstream([]string{})
+	done := make(chan struct{})
+	go func() {
+		u.Serve()
+		close(done)
+	}()
+	defer func() {
+		u.Stop()
+		<-done
+	}()
+
+	// set slots refresh trigger hook
+	triggerSlotsRefCalled := false
+	u.slotsRefTriggerHook = func() { triggerSlotsRefCalled = true }
+	defer func() {
+		assert.True(t, triggerSlotsRefCalled)
+		u.slotsRefTriggerHook = nil
+	}()
+
+	req := newSimpleRequest(newArray([]RespValue{
+		*newBulkString("get"),
+		*newBulkString("a"),
+	}))
+	defer req.Wait()
+	resp := newError("CLUSTERDOWN the cluster is down")
+	u.handleClusterDown(req, resp)
+
 }

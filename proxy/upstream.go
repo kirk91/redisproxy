@@ -16,9 +16,10 @@ import (
 const (
 	slotNum = 16384
 
-	ASKING = "asking"
-	MOVED  = "moved"
-	ASK    = "ask"
+	ASKING      = "asking"
+	MOVED       = "moved"
+	ASK         = "ask"
+	CLUSTERDOWN = "clusterdown"
 )
 
 var (
@@ -42,7 +43,8 @@ type upstream struct {
 	createClientCalls sync.Map // map[string]*createClientCall
 
 	slots               [slotNum]*redisHost
-	slotsRefreshCh      chan struct{}
+	slotsRefTriggerHook func() // only used to testing
+	slotsRefCh          chan struct{}
 	slotsLastUpdateTime time.Time
 
 	quit chan struct{}
@@ -51,10 +53,10 @@ type upstream struct {
 
 func newUpstream(hosts []string) *upstream {
 	u := &upstream{
-		hosts:          hosts,
-		slotsRefreshCh: make(chan struct{}, 1),
-		quit:           make(chan struct{}),
-		done:           make(chan struct{}),
+		hosts:      hosts,
+		slotsRefCh: make(chan struct{}, 1),
+		quit:       make(chan struct{}),
+		done:       make(chan struct{}),
 	}
 	u.clients.Store(make(map[string]*client))
 	return u
@@ -83,14 +85,6 @@ func (u *upstream) Stop() {
 	<-u.done
 }
 
-func (u *upstream) loadClients() map[string]*client {
-	return u.clients.Load().(map[string]*client)
-}
-
-func (u *upstream) updateClients(clients map[string]*client) {
-	u.clients.Store(clients)
-}
-
 func (u *upstream) MakeRequest(key []byte, req *simpleRequest) {
 	addr, err := u.chooseHost(key)
 	if err != nil {
@@ -116,16 +110,6 @@ func (u *upstream) chooseHost(key []byte) (string, error) {
 }
 
 func (u *upstream) makeRequestToHost(addr string, req *simpleRequest) {
-	// u.p.stats.UpstreamRqTotal.Inc()
-	// req.RegisterHook(func(req *simpleRequest) {
-	// if req.Response().Type == Error {
-	// u.p.stats.UpstreamRqFailure.Inc()
-	// } else {
-	// u.p.stats.UpstreamRqSuccess.Inc()
-	// }
-	// u.p.stats.UpstreamRqLatencyMs.Record(uint64(req.Duration() / time.Millisecond))
-	// })
-
 	select {
 	case <-u.quit:
 		req.SetResponse(newError(upstreamExited))
@@ -141,6 +125,14 @@ func (u *upstream) makeRequestToHost(addr string, req *simpleRequest) {
 	}
 	// TODO: detect client status
 	c.Send(req)
+}
+
+func (u *upstream) loadClients() map[string]*client {
+	return u.clients.Load().(map[string]*client)
+}
+
+func (u *upstream) updateClients(clients map[string]*client) {
+	u.clients.Store(clients)
 }
 
 func (u *upstream) getClient(addr string) (*client, error) {
@@ -185,6 +177,7 @@ func (u *upstream) createClient(addr string) (*client, error) {
 	}
 	c = newClient(conn)
 	c.SetRedirectionCallback(u.handleRedirection)
+	c.SetClusterDownCallabck(u.handleClusterDown)
 	go func() {
 		c.Start()
 		u.removeClient(addr)
@@ -220,11 +213,17 @@ func (u *upstream) removeClientLocked(addr string) {
 }
 
 func (u *upstream) handleRedirection(req *simpleRequest, resp *RespValue) {
-	err := strings.Split(string(resp.Text), " ")
-	hostAddr := err[2]
-	switch strings.ToLower(err[0]) {
+	parts := strings.Split(string(resp.Text), " ")
+	// moved|ask slot addr, like 'moved 3999 127.0.0.1:6381'
+	if len(parts) < 3 {
+		req.SetResponse(resp)
+		return
+	}
+
+	errPrefix := parts[0]
+	hostAddr := parts[2]
+	switch strings.ToLower(errPrefix) {
 	case MOVED:
-		// u.p.stats.Counter("moved").Inc()
 		u.makeRequestToHost(hostAddr, req)
 	case ASK:
 		askingReq := newSimpleRequest(newArray([]RespValue{
@@ -236,10 +235,22 @@ func (u *upstream) handleRedirection(req *simpleRequest, resp *RespValue) {
 	u.triggerSlotsRefresh()
 }
 
+func (u *upstream) handleClusterDown(req *simpleRequest, resp *RespValue) {
+	// Usually the cluster is able to recover itself after a CLUSTERDOWN
+	// error, so try to request the new slots info.
+	u.triggerSlotsRefresh()
+	// TODO: add some retry
+	req.SetResponse(resp)
+}
+
 func (u *upstream) triggerSlotsRefresh() {
 	select {
-	case u.slotsRefreshCh <- struct{}{}:
+	case u.slotsRefCh <- struct{}{}:
 	default:
+	}
+
+	if u.slotsRefTriggerHook != nil {
+		u.slotsRefTriggerHook()
 	}
 }
 
@@ -256,7 +267,7 @@ func (u *upstream) loopRefreshSlots() {
 		case <-u.quit:
 			return
 		case <-time.After(slotsRefFreq):
-		case <-u.slotsRefreshCh:
+		case <-u.slotsRefCh:
 		}
 
 		u.refreshSlots()
@@ -272,19 +283,15 @@ func (u *upstream) loopRefreshSlots() {
 }
 
 func (u *upstream) refreshSlots() {
-	// scope := u.p.stats.NewChild("slots_refresh")
-	// scope.Counter("total").Inc()
 	err := u.doSlotsRefresh()
 	if err == nil {
 		klog.V(4).Infof("refresh slots success")
-		// scope.Counter("success").Inc()
 		u.slotsLastUpdateTime = time.Now()
 		return
 	}
 
-	// scope.Counter("failure").Inc()
 	klog.Warningf("fail to refresh slots: %v, will retry...", err)
-	// retry
+	// retry it
 	u.triggerSlotsRefresh()
 	return
 }
@@ -348,6 +355,7 @@ type client struct {
 	processingReqs chan *simpleRequest
 
 	onRedirection func(req *simpleRequest, resp *RespValue)
+	onClusterDown func(req *simpleRequest, resp *RespValue)
 
 	quitOnce sync.Once
 	quit     chan struct{}
@@ -368,6 +376,10 @@ func newClient(conn net.Conn) *client {
 
 func (c *client) SetRedirectionCallback(cb func(*simpleRequest, *RespValue)) {
 	c.onRedirection = cb
+}
+
+func (c *client) SetClusterDownCallabck(cb func(*simpleRequest, *RespValue)) {
+	c.onClusterDown = cb
 }
 
 func (c *client) Start() {
@@ -449,17 +461,22 @@ func (c *client) handleResp(req *simpleRequest, v *RespValue) {
 		return
 	}
 
-	msg := string(v.Text)
-	parts := strings.Split(msg, " ")
-	if len(parts) == 3 {
-		// moved|ask slot addr, like 'moved 3999 127.0.0.1:6381'
-		if strings.EqualFold(parts[0], MOVED) || strings.EqualFold(parts[0], ASK) {
-			if c.onRedirection != nil {
-				c.onRedirection(req, v)
-				return
-			}
+	parts := strings.Split(string(v.Text), " ")
+	switch errPrefix := parts[0]; {
+	case strings.EqualFold(errPrefix, MOVED),
+		strings.EqualFold(errPrefix, ASK):
+		if c.onRedirection != nil {
+			c.onRedirection(req, v)
+			return
+		}
+	case strings.EqualFold(errPrefix, CLUSTERDOWN):
+		if c.onClusterDown != nil {
+			c.onClusterDown(req, v)
+			return
 		}
 	}
+
+	// set error as response
 	req.SetResponse(v)
 }
 
